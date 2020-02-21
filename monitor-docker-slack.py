@@ -50,6 +50,9 @@ def get_stopped_containers(container_list):
 def get_unhealthy_containers(container_list):
     return [container for container in container_list if 'unhealthy' in container[1]]
 
+def get_restarting_containers(container_list):
+    return [container for container in container_list if 'Restarting' in container[1]]
+
 
 # TODO: simplify this by lambda
 def containers_remove_by_name_pattern(container_list, name_pattern_list):
@@ -79,15 +82,19 @@ def monitor_docker_slack(docker_sock_file, white_pattern_list):
     container_list = list_containers_by_sock(docker_sock_file)
     stopped_container_list = get_stopped_containers(container_list)
     unhealthy_container_list = get_unhealthy_containers(container_list)
+    restarting_container_list = get_restarting_containers(container_list)
 
     stopped_container_list = containers_remove_by_name_pattern(stopped_container_list, white_pattern_list)
     unhealthy_container_list = containers_remove_by_name_pattern(unhealthy_container_list, white_pattern_list)
+    restarting_container_list = containers_remove_by_name_pattern(restarting_container_list, white_pattern_list)
 
     err_msg = ""
     if len(stopped_container_list) != 0:
         err_msg = "Detected Stopped Containers: \n%s\n%s" % (container_list_to_str(stopped_container_list), err_msg)
     if len(unhealthy_container_list) != 0:
         err_msg = "Detected Unhealthy Containers: \n%s\n%s" % (container_list_to_str(unhealthy_container_list), err_msg)
+    if len(restarting_container_list) != 0:
+        err_msg = "Detected Restarting Containers: \n%s\n%s" % (container_list_to_str(restarting_container_list), err_msg)
 
     if err_msg == "":
         return "OK", "OK: detect no stopped or unhealthy containers"
