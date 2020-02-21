@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # -------------------------------------------------------------------
 # @copyright 2017 DennyZhang.com
 # Licensed under MIT
@@ -15,9 +15,12 @@ import argparse
 import json
 import re
 import time
+import signal
+import sys
 
 import requests_unixsocket
 import requests
+from threading import Event
 
 
 def name_in_list(name, name_pattern_list):
@@ -102,7 +105,9 @@ def monitor_docker_slack(docker_sock_file, white_pattern_list):
         return "ERROR", err_msg
 
 
-if __name__ == '__main__':
+exit = Event()
+
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--slack_webhook', required=True, help="Slack webhook to post alerts.", type=str)
     parser.add_argument('--whitelist', default='', required=False,
@@ -121,16 +126,22 @@ if __name__ == '__main__':
     msg_prefix = l.msg_prefix
 
     if slack_webhook == '':
-        print("Warning: Please provide slack webhook, to receive alerts properly.")
+        print("Warning: Please provide slack webhook, to receive alerts properly.", flush=True)
 
-    requests.post(slack_webhook, data=json.dumps({'text': 'Hello Channel! I am watching now!'}))
+    msg = 'Hello Channel! I am watching now!'
+
+    if msg_prefix != "":
+        msg = "%s\n%s" % (msg_prefix, msg)
+    requests.post(slack_webhook, data=json.dumps({'text': msg}))
 
     has_send_error_alert = False
-    while True:
+
+    while not exit.is_set():
+        print("Checking", flush=True)
         (status, err_msg) = monitor_docker_slack("/var/run/docker.sock", white_pattern_list)
         if msg_prefix != "":
             err_msg = "%s\n%s" % (msg_prefix, err_msg)
-        print("%s: %s" % (status, err_msg))
+        print("%s: %s" % (status, err_msg), flush=True)
         if status == "OK":
             if has_send_error_alert is True:
                 requests.post(slack_webhook, data=json.dumps({'text': err_msg}))
@@ -140,6 +151,25 @@ if __name__ == '__main__':
                 requests.post(slack_webhook, data=json.dumps({'text': err_msg}))
                 # avoid send alerts over and over again
                 has_send_error_alert = True
-        time.sleep(check_interval)
-# File : monitor-docker-slack.py ends
+        exit.wait(check_interval)
 
+    # perform any cleanup here
+    print("Bye Bye", flush=True)
+    msg = 'Bye bye, no longer watching!'
+    if msg_prefix != "":
+        msg = "%s\n%s" % (msg_prefix, msg)
+    requests.post(slack_webhook, data=json.dumps({'text': msg}))
+
+def quit(signo, _frame):
+    print("Interrupted by %d, shutting down" % signo, flush=True)
+    exit.set()
+
+if __name__ == '__main__':
+
+    import signal
+    for sig in ('TERM', 'HUP', 'INT'):
+        signal.signal(getattr(signal, 'SIG'+sig), quit);
+
+    main()
+
+# File : monitor-docker-slack.py ends
