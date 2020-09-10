@@ -76,7 +76,7 @@ def containers_remove_by_name_pattern(container_list, name_pattern_list, list_ty
     for container in container_list:
         names, status = container
         for name in names:
-            ok = not list_type and name_in_whitelist(name, name_pattern_list) or list_type and not name_in_blacklist(name, name_pattern_list)
+            ok = not list_type and not name_in_whitelist(name, name_pattern_list) or list_type and name_in_blacklist(name, name_pattern_list)
             if ok:
                 break
         else:
