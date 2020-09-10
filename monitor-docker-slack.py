@@ -51,7 +51,6 @@ def list_containers_by_sock(docker_sock_file):
     for container in json.loads(r.content):
         item = (container["Names"], container["Status"])
         container_list.append(item)
-    print(container_list)
     return container_list
 
 
