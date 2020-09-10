@@ -13,15 +13,15 @@
 ##################################################
 # Base Docker image: https://hub.docker.com/_/python/
 
-FROM python:latest
+FROM python:3.6.8
 
-ENV SLACK_CHANNEL ""
-ENV SLACK_TOKEN ""
+ENV SLACK_WEBHOOK ""
 
 ENV MSG_PREFIX ""
 ENV WHITE_LIST ""
+ENV BLACK_LIST ""
 # seconds
-ENV CHECK_INTERVAL "300"
+ENV CHECK_INTERVAL ""
 
 LABEL maintainer="Denny<https://www.dennyzhang.com/contact>"
 

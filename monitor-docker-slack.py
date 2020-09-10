@@ -22,12 +22,20 @@ import requests_unixsocket
 import requests
 from threading import Event
 
+# True is for BLACK_LIST
+# False is for WHITE_LIST
+LIST_TYPE = True
 
-def name_in_list(name, name_pattern_list):
+
+def name_in_whitelist(name, name_pattern_list):
     for name_pattern in name_pattern_list:
         if re.search(name_pattern, name) is not None:
             return True
     return False
+
+
+def name_in_blacklist(name, name_pattern_list):
+    return not name_in_whitelist(name, name_pattern_list)
 
 
 ################################################################################
@@ -43,6 +51,7 @@ def list_containers_by_sock(docker_sock_file):
     for container in json.loads(r.content):
         item = (container["Names"], container["Status"])
         container_list.append(item)
+    print(container_list)
     return container_list
 
 
@@ -53,12 +62,13 @@ def get_stopped_containers(container_list):
 def get_unhealthy_containers(container_list):
     return [container for container in container_list if 'unhealthy' in container[1]]
 
+
 def get_restarting_containers(container_list):
     return [container for container in container_list if 'Restarting' in container[1]]
 
 
 # TODO: simplify this by lambda
-def containers_remove_by_name_pattern(container_list, name_pattern_list):
+def containers_remove_by_name_pattern(container_list, name_pattern_list, list_type=LIST_TYPE):
     if len(name_pattern_list) == 0:
         return container_list
 
@@ -66,7 +76,8 @@ def containers_remove_by_name_pattern(container_list, name_pattern_list):
     for container in container_list:
         names, status = container
         for name in names:
-            if name_in_list(name, name_pattern_list):
+            ok = not list_type and name_in_whitelist(name, name_pattern_list) or list_type and not name_in_blacklist(name, name_pattern_list)
+            if ok:
                 break
         else:
             l.append(container)
@@ -81,15 +92,21 @@ def container_list_to_str(container_list):
     return msg
 
 
-def monitor_docker_slack(docker_sock_file, white_pattern_list):
+def monitor_docker_slack(docker_sock_file, black_pattern_list, white_pattern_list, list_type=LIST_TYPE):
     container_list = list_containers_by_sock(docker_sock_file)
     stopped_container_list = get_stopped_containers(container_list)
     unhealthy_container_list = get_unhealthy_containers(container_list)
     restarting_container_list = get_restarting_containers(container_list)
 
-    stopped_container_list = containers_remove_by_name_pattern(stopped_container_list, white_pattern_list)
-    unhealthy_container_list = containers_remove_by_name_pattern(unhealthy_container_list, white_pattern_list)
-    restarting_container_list = containers_remove_by_name_pattern(restarting_container_list, white_pattern_list)
+    pattern_list = []
+    if list_type:
+        pattern_list = black_pattern_list
+    else:
+        pattern_list = white_pattern_list
+
+    stopped_container_list = containers_remove_by_name_pattern(stopped_container_list, pattern_list, list_type)
+    unhealthy_container_list = containers_remove_by_name_pattern(unhealthy_container_list, pattern_list, list_type)
+    restarting_container_list = containers_remove_by_name_pattern(restarting_container_list, pattern_list, list_type)
 
     err_msg = ""
     if len(stopped_container_list) != 0:
@@ -107,9 +124,13 @@ def monitor_docker_slack(docker_sock_file, white_pattern_list):
 
 exit = Event()
 
+
 def main():
+    global LIST_TYPE
     parser = argparse.ArgumentParser()
     parser.add_argument('--slack_webhook', required=True, help="Slack webhook to post alerts.", type=str)
+    parser.add_argument('--blacklist', default='', required=False,
+                        help="Check certain containers. A list of regexp separated by comma.", type=str)
     parser.add_argument('--whitelist', default='', required=False,
                         help="Skip checking certain containers. A list of regexp separated by comma.", type=str)
     parser.add_argument('--check_interval', default='300', required=False, help="Periodical check. By seconds.",
@@ -117,10 +138,22 @@ def main():
     parser.add_argument('--msg_prefix', default='', required=False, help="Slack message prefix.", type=str)
     l = parser.parse_args()
     check_interval = l.check_interval
+    black_pattern_list = l.blacklist.split(',')
     white_pattern_list = l.whitelist.split(',')
+
+    if black_pattern_list == ['']:
+        black_pattern_list = []
 
     if white_pattern_list == ['']:
         white_pattern_list = []
+
+    if white_pattern_list and black_pattern_list:
+        print("Warning: Please provide whitelist or blacklist; not both", flush=True)
+
+    if white_pattern_list:
+        LIST_TYPE = False
+    if black_pattern_list:
+        LIST_TYPE = True
 
     slack_webhook = l.slack_webhook
     msg_prefix = l.msg_prefix
@@ -138,7 +171,7 @@ def main():
 
     while not exit.is_set():
         print("Checking", flush=True)
-        (status, err_msg) = monitor_docker_slack("/var/run/docker.sock", white_pattern_list)
+        (status, err_msg) = monitor_docker_slack("/var/run/docker.sock", black_pattern_list, white_pattern_list, LIST_TYPE)
         if msg_prefix != "":
             err_msg = "%s\n%s" % (msg_prefix, err_msg)
         print("%s: %s" % (status, err_msg), flush=True)
@@ -160,9 +193,11 @@ def main():
         msg = "%s\n%s" % (msg_prefix, msg)
     requests.post(slack_webhook, data=json.dumps({'text': msg}))
 
+
 def quit(signo, _frame):
     print("Interrupted by %d, shutting down" % signo, flush=True)
     exit.set()
+
 
 if __name__ == '__main__':
 
